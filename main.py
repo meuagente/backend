@@ -1,10 +1,13 @@
 import os
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request
 from openai import OpenAI
 
 app = Flask(__name__)
 
+# ==========================
+# VARIÁVEIS DE AMBIENTE
+# ==========================
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID")
@@ -40,25 +43,32 @@ def webhook():
     # 🔹 Quando receber mensagem
     if request.method == "POST":
         data = request.json
-        print("JSON RECEBIDO:", data)
+        print("JSON RECEBIDO COMPLETO:")
+        print(data)
 
         try:
             message = data["entry"][0]["changes"][0]["value"]["messages"][0]["text"]["body"]
             from_number = data["entry"][0]["changes"][0]["value"]["messages"][0]["from"]
 
-            # 🔥 Chama OpenAI
+            # 🔥 Chamada OpenAI (modelo econômico)
             resposta = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "Você é o assistente pessoal de Marcus Ferreira. Seja objetivo e inteligente."},
-                    {"role": "user", "content": message}
+                    {
+                        "role": "system",
+                        "content": "Você é o assistente pessoal de Marcus Ferreira. Seja direto, inteligente e objetivo."
+                    },
+                    {
+                        "role": "user",
+                        "content": message
+                    }
                 ],
                 max_tokens=200
             )
 
             texto_resposta = resposta.choices[0].message.content
 
-            # 🔥 Envia resposta para WhatsApp
+            # 🔥 Enviar resposta para WhatsApp
             url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
 
             headers = {
@@ -80,3 +90,11 @@ def webhook():
             print("ERRO:", str(e))
 
         return "ok", 200
+
+
+# ==========================
+# PORTA CORRETA PARA RAILWAY
+# ==========================
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
