@@ -34,16 +34,11 @@ def home():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.json
-
-    print("\n======================")
-    print("JSON RECEBIDO COMPLETO:")
-    print(data)
-    print("======================\n")
-
-    # Tentativa simples de resposta automática
     try:
-        if data.get("entry"):
+        data = request.get_json()
+        print("JSON RECEBIDO:", data)
+
+        if data and "entry" in data:
             changes = data["entry"][0]["changes"][0]["value"]
 
             if "messages" in changes:
@@ -53,10 +48,11 @@ def webhook():
                 send_whatsapp_message(from_number, "Recebi sua mensagem 👍")
 
     except Exception as e:
-        print("ERRO NO WEBHOOK:", str(e))
+        print("ERRO:", str(e))
 
     return "ok", 200
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
