@@ -1,58 +1,82 @@
 import os
 import requests
-from flask import Flask, request
+from flask import Flask, request, jsonify
+from openai import OpenAI
 
 app = Flask(__name__)
 
-WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
-PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
+VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
+WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN")
+PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-def send_whatsapp_message(to, message):
-    url = f"https://graph.facebook.com/v18.0/{PHONE_NUMBER_ID}/messages"
-
-    headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json"
-    }
-
-    data = {
-        "messaging_product": "whatsapp",
-        "to": to,
-        "type": "text",
-        "text": {"body": message}
-    }
-
-    response = requests.post(url, headers=headers, json=data)
-    print("Resposta envio WhatsApp:", response.text)
-
-
+# ==========================
+# ROTA HOME
+# ==========================
 @app.route("/", methods=["GET"])
 def home():
-    return "Meu Agente está online!"
+    return "Meu agente está online!"
 
-
-@app.route("/webhook", methods=["POST"])
+# ==========================
+# WEBHOOK META
+# ==========================
+@app.route("/webhook", methods=["GET", "POST"])
 def webhook():
-    try:
-        data = request.get_json()
+
+    # 🔹 Verificação inicial da Meta
+    if request.method == "GET":
+        mode = request.args.get("hub.mode")
+        challenge = request.args.get("hub.challenge")
+        token = request.args.get("hub.verify_token")
+
+        if mode and token:
+            if mode == "subscribe" and token == VERIFY_TOKEN:
+                return challenge, 200
+            else:
+                return "Erro de verificação", 403
+
+    # 🔹 Quando receber mensagem
+    if request.method == "POST":
+        data = request.json
         print("JSON RECEBIDO:", data)
 
-        if data and "entry" in data:
-            changes = data["entry"][0]["changes"][0]["value"]
+        try:
+            message = data["entry"][0]["changes"][0]["value"]["messages"][0]["text"]["body"]
+            from_number = data["entry"][0]["changes"][0]["value"]["messages"][0]["from"]
 
-            if "messages" in changes:
-                message = changes["messages"][0]
-                from_number = message["from"]
+            # 🔥 Chama OpenAI
+            resposta = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "Você é o assistente pessoal de Marcus Ferreira. Seja objetivo e inteligente."},
+                    {"role": "user", "content": message}
+                ],
+                max_tokens=200
+            )
 
-                send_whatsapp_message(from_number, "Recebi sua mensagem 👍")
+            texto_resposta = resposta.choices[0].message.content
 
-    except Exception as e:
-        print("ERRO:", str(e))
+            # 🔥 Envia resposta para WhatsApp
+            url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
 
-    return "ok", 200
+            headers = {
+                "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+                "Content-Type": "application/json"
+            }
 
+            payload = {
+                "messaging_product": "whatsapp",
+                "to": from_number,
+                "type": "text",
+                "text": {"body": texto_resposta}
+            }
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+            response = requests.post(url, headers=headers, json=payload)
+            print("Resposta envio WhatsApp:", response.text)
+
+        except Exception as e:
+            print("ERRO:", str(e))
+
+        return "ok", 200
