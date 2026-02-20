@@ -2,11 +2,12 @@ import os
 import requests
 from flask import Flask, request, jsonify
 from openai import OpenAI
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 app = Flask(__name__)
 
-# Variáveis de ambiente
+# ================= VARIÁVEIS =================
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
@@ -34,7 +35,7 @@ def get_google_access_token():
     response = requests.post(url, data=data)
     return response.json().get("access_token")
 
-# ================= CALENDAR FUNCTIONS =================
+# ================= CALENDAR =================
 
 def get_next_events():
     access_token = get_google_access_token()
@@ -43,7 +44,7 @@ def get_next_events():
         "Authorization": f"Bearer {access_token}"
     }
 
-    now = datetime.utcnow().isoformat() + "Z"
+    now = datetime.now(timezone.utc).isoformat()
 
     url = f"https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin={now}&maxResults=5&singleEvents=true&orderBy=startTime"
 
@@ -57,40 +58,11 @@ def get_next_events():
 
     for event in events:
         start = event["start"].get("dateTime", event["start"].get("date"))
-        resposta += f"- {event['summary']} em {start}\n"
+        resumo = event.get("summary", "Sem título")
+        resposta += f"- {resumo} em {start}\n"
 
     return resposta
 
-
-def create_event(summary, start_time):
-    access_token = get_google_access_token()
-
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Content-Type": "application/json"
-    }
-
-    end_time = (datetime.fromisoformat(start_time) + timedelta(hours=1)).isoformat()
-
-    event = {
-        "summary": summary,
-        "start": {
-            "dateTime": start_time,
-            "timeZone": "America/Sao_Paulo"
-        },
-        "end": {
-            "dateTime": end_time,
-            "timeZone": "America/Sao_Paulo"
-        }
-    }
-
-    requests.post(
-        "https://www.googleapis.com/calendar/v3/calendars/primary/events",
-        headers=headers,
-        json=event
-    )
-
-    return "Compromisso criado com sucesso!"
 
 # ================= WEBHOOK =================
 
@@ -120,29 +92,46 @@ def webhook():
             user_message = message["text"]["body"]
             from_number = message["from"]
 
-            # 🔥 COMANDOS DIRETOS
-            if "próximos compromissos" in user_message.lower():
+            # ================= IA DECIDE AÇÃO =================
+
+            decision = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """Você é um assistente pessoal.
+Se o usuário perguntar sobre agenda, compromissos, reuniões ou eventos,
+responda apenas com:
+AGENDA
+
+Caso contrário responda:
+NORMAL
+"""
+                    },
+                    {"role": "user", "content": user_message}
+                ]
+            )
+
+            action = decision.choices[0].message.content.strip()
+
+            if action == "AGENDA":
                 ai_reply = get_next_events()
-
-            elif "criar compromisso" in user_message.lower():
-                # exemplo simples: criar compromisso reunião amanhã às 15
-                now = datetime.now()
-                start_time = (now + timedelta(days=1)).replace(hour=15, minute=0).isoformat()
-                ai_reply = create_event("Compromisso criado pelo WhatsApp", start_time)
-
             else:
-                # 🔥 OpenAI responde normalmente
                 response = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
-                        {"role": "system", "content": "Você é um assistente pessoal inteligente, objetivo e profissional."},
+                        {
+                            "role": "system",
+                            "content": "Você é um assistente pessoal inteligente, profissional e objetivo."
+                        },
                         {"role": "user", "content": user_message}
                     ]
                 )
 
                 ai_reply = response.choices[0].message.content
 
-            # 🔥 Envia resposta para WhatsApp
+            # ================= ENVIA PARA WHATSAPP =================
+
             url = f"https://graph.facebook.com/v22.0/{PHONE_NUMBER_ID}/messages"
 
             headers = {
