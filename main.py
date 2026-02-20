@@ -1,64 +1,11 @@
 import os
 import requests
 from flask import Flask, request
-from datetime import datetime, timedelta
-import json
 
 app = Flask(__name__)
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
-
-GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-GOOGLE_REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN")
-
-
-def get_google_access_token():
-    url = "https://oauth2.googleapis.com/token"
-    data = {
-        "client_id": GOOGLE_CLIENT_ID,
-        "client_secret": GOOGLE_CLIENT_SECRET,
-        "refresh_token": GOOGLE_REFRESH_TOKEN,
-        "grant_type": "refresh_token",
-    }
-
-    response = requests.post(url, data=data)
-    return response.json().get("access_token")
-
-
-def get_next_events():
-    access_token = get_google_access_token()
-
-    now = datetime.utcnow().isoformat() + "Z"
-
-    url = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
-
-    params = {
-        "timeMin": now,
-        "maxResults": 5,
-        "singleEvents": True,
-        "orderBy": "startTime"
-    }
-
-    headers = {
-        "Authorization": f"Bearer {access_token}"
-    }
-
-    response = requests.get(url, headers=headers, params=params)
-    events = response.json().get("items", [])
-
-    if not events:
-        return "Você não tem compromissos futuros."
-
-    mensagem = "Seus próximos compromissos:\n\n"
-
-    for event in events:
-        start = event["start"].get("dateTime", event["start"].get("date"))
-        mensagem += f"- {event['summary']} em {start}\n"
-
-    return mensagem
 
 
 def send_whatsapp_message(to, message):
@@ -76,7 +23,8 @@ def send_whatsapp_message(to, message):
         "text": {"body": message}
     }
 
-    requests.post(url, headers=headers, json=data)
+    response = requests.post(url, headers=headers, json=data)
+    print("Resposta envio WhatsApp:", response.text)
 
 
 @app.route("/", methods=["GET"])
@@ -88,17 +36,24 @@ def home():
 def webhook():
     data = request.json
 
-    if data.get("entry"):
-        changes = data["entry"][0]["changes"][0]["value"]
+    print("\n======================")
+    print("JSON RECEBIDO COMPLETO:")
+    print(data)
+    print("======================\n")
 
-        if "messages" in changes:
-            message = changes["messages"][0]
-            text = message["text"]["body"]
-            from_number = message["from"]
+    # Tentativa simples de resposta automática
+    try:
+        if data.get("entry"):
+            changes = data["entry"][0]["changes"][0]["value"]
 
-            if "agenda" in text.lower():
-                resposta = get_next_events()
-                send_whatsapp_message(from_number, resposta)
+            if "messages" in changes:
+                message = changes["messages"][0]
+                from_number = message["from"]
+
+                send_whatsapp_message(from_number, "Recebi sua mensagem 👍")
+
+    except Exception as e:
+        print("ERRO NO WEBHOOK:", str(e))
 
     return "ok", 200
 
